@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
 FixMatch 半监督 CIFAR-10 训练脚本。
-用法: python train.py --num_labels 40 [--device cuda] [--total_steps 100]
+用法: python train.py --num_labels 40 [--device cuda] [--total_steps 1048576]
+
+优化:
+  - AMP 混合精度 (--use_amp)
+  - cudnn benchmark
+  - non_blocking 数据传输
+  - 单 GPU 下关闭 interleave (--use_interleave, 默认 False)
+  - 数据预取 (pin_memory + non_blocking)
 """
 
 import os
@@ -29,12 +36,11 @@ def set_seed(seed):
 
 
 def evaluate(model, test_loader, device):
-    """在测试集上评估模型准确率。"""
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
         for x, y in test_loader:
-            x, y = x.to(device), y.to(device)
+            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             logits = model(x)
             preds = logits.argmax(dim=1)
             correct += (preds == y).sum().item()
@@ -45,6 +51,11 @@ def evaluate(model, test_loader, device):
 def train(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     print(f"[Train] Using device: {device}")
+
+    # cudnn 自动调优（首步会触发卷积算法搜索，增加约 10s 启动开销）
+    if device.type == 'cuda' and args.cudnn_benchmark:
+        torch.backends.cudnn.benchmark = True
+        print("[Train] cudnn.benchmark = True")
 
     set_seed(args.seed)
 
@@ -80,6 +91,9 @@ def train(args):
         optimizer, T_max=args.total_steps, eta_min=0
     )
 
+    # AMP 混合精度
+    scaler = torch.amp.GradScaler('cuda') if args.use_amp else None
+
     # 日志
     writer = SummaryWriter(log_dir=args.log_dir)
 
@@ -89,7 +103,8 @@ def train(args):
     labeled_iter = iter(labeled_loader)
     unlabeled_iter = iter(unlabeled_loader)
 
-    print(f"[Train] Starting training: {args.total_steps} steps")
+    print(f"[Train] Starting training: {args.total_steps} steps "
+          f"(AMP={args.use_amp}, interleave={args.use_interleave})")
     start_time = time.time()
 
     for step in range(args.total_steps):
@@ -106,20 +121,26 @@ def train(args):
             unlabeled_iter = iter(unlabeled_loader)
             x_w, x_s = next(unlabeled_iter)
 
-        x_l, y_l = x_l.to(device), y_l.to(device)
-        x_w, x_s = x_w.to(device), x_s.to(device)
+        x_l, y_l = x_l.to(device, non_blocking=True), y_l.to(device, non_blocking=True)
+        x_w, x_s = x_w.to(device, non_blocking=True), x_s.to(device, non_blocking=True)
 
-        # FixMatch 损失
-        total_loss, sup_loss, unsup_loss, mask_ratio = fixmatch_loss(
-            model, x_l, y_l, x_w, x_s,
-            confidence_threshold=args.confidence_threshold,
-            unlabeled_loss_weight=args.unlabeled_loss_weight,
-            use_interleave=True,
-        )
+        # FixMatch 损失 (AMP autocast)
+        with torch.amp.autocast('cuda', enabled=args.use_amp):
+            total_loss, sup_loss, unsup_loss, mask_ratio = fixmatch_loss(
+                model, x_l, y_l, x_w, x_s,
+                confidence_threshold=args.confidence_threshold,
+                unlabeled_loss_weight=args.unlabeled_loss_weight,
+                use_interleave=args.use_interleave,
+            )
 
         optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
+        if scaler is not None:
+            scaler.scale(total_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            total_loss.backward()
+            optimizer.step()
         scheduler.step()
 
         # 更新 EMA
@@ -129,15 +150,17 @@ def train(args):
         if (step + 1) % args.log_interval == 0 or step == 0:
             elapsed = time.time() - start_time
             lr_val = scheduler.get_last_lr()[0]
+            steps_per_sec = (step + 1) / max(elapsed, 1e-6)
             print(f"[Step {step+1:7d}/{args.total_steps}] "
                   f"lr={lr_val:.6f} sup={sup_loss.item():.4f} "
                   f"unsup={unsup_loss.item():.4f} total={total_loss.item():.4f} "
-                  f"mask={mask_ratio:.3f} time={elapsed:.1f}s")
+                  f"mask={mask_ratio:.3f} {steps_per_sec:.1f}st/s time={elapsed:.1f}s")
             writer.add_scalar('train/sup_loss', sup_loss.item(), step)
             writer.add_scalar('train/unsup_loss', unsup_loss.item(), step)
             writer.add_scalar('train/total_loss', total_loss.item(), step)
             writer.add_scalar('train/mask_ratio', mask_ratio, step)
             writer.add_scalar('train/lr', lr_val, step)
+            writer.add_scalar('train/steps_per_sec', steps_per_sec, step)
 
         # 评估
         if (step + 1) % args.eval_interval == 0 or step == 0:
@@ -175,7 +198,7 @@ def train(args):
 
     total_time = time.time() - start_time
     print(f"\n[Final] Test Accuracy: {final_acc:.2f}% (best: {best_acc:.2f}%)")
-    print(f"[Final] Total time: {total_time:.1f}s")
+    print(f"[Final] Total time: {total_time:.1f}s ({total_time/3600:.2f}h)")
 
     writer.close()
     return best_acc, final_acc
@@ -217,6 +240,12 @@ def main():
     parser.add_argument('--log_interval', type=int, default=128)
     parser.add_argument('--eval_interval', type=int, default=1024)
     parser.add_argument('--save_interval', type=int, default=65536)
+    parser.add_argument('--use_amp', action='store_true', default=False,
+                        help='启用 AMP 混合精度 (FP16)')
+    parser.add_argument('--use_interleave', action='store_true', default=False,
+                        help='启用 interleave (多 GPU 需要，单 GPU 可关闭)')
+    parser.add_argument('--cudnn_benchmark', action='store_true', default=False,
+                        help='启用 cudnn benchmark 自动调优 (首步 ~10s 开销，长训练建议启用)')
 
     # 系统
     parser.add_argument('--seed', type=int, default=0)

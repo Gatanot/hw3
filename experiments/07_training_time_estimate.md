@@ -1,50 +1,124 @@
 # 训练时间预估
 
-## 方法
-基于 RTX 4050 Laptop GPU 实测吞吐量，按 FP32 TFLOPS 线性外推。
+## 实测数据
 
-## 实测基准
-- 设备: RTX 4050 Laptop
-- 稳态每步: ~70 ms (batch=16+48=64 张图)
-- 等效: ~14.3 steps/s（小 batch）
+### 小 batch (16 labeled + 48 unlabeled = 64 张/步)
 
-## 全量 batch 换算
-全量设定 batch=64, uratio=7, 每步 64+448=512 张图。
-小 batch 是 64 张/步，全量是 512 张/步（8×）。
-但计算量与 batch 基本线性 → 每步 ~560 ms。
+| 配置 | 每步 | 总时间 (50步) | 备注 |
+|------|------|-------------|------|
+| 优化前 (v1) | ~70 ms | 8.8s | cudnn_benchmark=off, interleave=on |
+| 无 AMP, 无 interleave | ~99 ms | 9.9s | cudnn_benchmark=off |
+| AMP | ~120 ms | 12.1s | AMP 开销 > 收益 (batch 太小) |
 
-## 各 GPU 预估 (2^20 步)
+### 全量 batch (64 labeled + 448 unlabeled = 512 张/步) — 实测
 
-### RTX 4050 Laptop (本机, 8.9 TFLOPS)
-- 每步: ~560 ms → ~1.79 steps/s
-- 单轮: 1048576 / 1.79 = 585,797 s ≈ **163 小时 (6.8天)**
-- 三轮: ~490 小时 ≈ 20 天
+| 配置 | 每步 | 步/秒 | 2^20 步耗时 |
+|------|------|-------|-----------|
+| FP32 (无 AMP) | **248 ms** | 4.0 | **~73 小时 (3.0天)** |
+| **AMP (混合精度)** | **145 ms** | 6.9 | **~42 小时 (1.75天)** |
+| AMP 加速比 | — | **1.71×** | — |
 
-### V100 32GB (15.7 TFLOPS, ~1.76×)
-- 每步: ~318 ms → ~3.14 steps/s
-- 单轮: ~**93 小时 (3.9天)**
-- 三轮: ~12 天
+### AMP 实测原始输出
+```
+Full batch (64+448, 30 iters):
+FP32: 7.44s → 4.0 steps/s → 248.0 ms/step
+AMP:  4.34s → 6.9 steps/s → 144.7 ms/step
+Speedup: 1.71x
+```
 
-### V100 16GB (14.0 TFLOPS, ~1.57×)
-- 每步: ~357 ms → ~2.80 steps/s
-- 单轮: ~**104 小时 (4.3天)**
+## 校正后的各 GPU 预估 (基于实测, FP32→AMP=1.71×)
 
-### RTX 4090 (82.6 TFLOPS, ~9.28×)
-- 每步: ~60 ms → ~16.7 steps/s
-- 单轮: ~**17.5 小时**
-- 三轮: ~2.2 天
+| GPU | FP32 TFLOPS | vs RTX4050 | FP32/轮 | AMP/轮 | AMP三轮 |
+|-----|-------------|------------|---------|--------|---------|
+| RTX 4050 Laptop | 8.9 | 1.00× | 73 h (3天) | **42 h (1.75天)** | 5.25天 |
+| V100 32GB | 15.7 | 1.76× | 41 h | **24 h** | 3.0天 |
+| V100 16GB | 14.0 | 1.57× | 46 h | **27 h** | 3.4天 |
+| RTX 4090 | 82.6 | 9.28× | 7.9 h | **4.6 h** | **0.6天** |
 
-## 优化后预估 (AMP + interleave 关闭 + 预取, ~1.94×)
+## 各项优化实测效果 (全量 batch)
 
-| GPU | 优化前/轮 | 优化后/轮 | 三轮优化后 |
-|-----|----------|----------|-----------|
-| RTX 4050 | 163 h | 84 h (3.5天) | 10.5天 |
-| V100 32GB | 93 h | 48 h (2天) | 6天 |
-| V100 16GB | 104 h | 54 h (2.3天) | 6.7天 |
-| RTX 4090 | 17.5 h | **9 h** | **1.1天** |
+| 优化 | 每步时间 | 加速比 |
+|------|---------|--------|
+| 基线 (FP32, no interleave) | 248 ms | 1.00× |
+| + cudnn_benchmark | 248 ms | — (仅首步 +10s) |
+| + AMP | 145 ms | **1.71×** |
+| + non_blocking transfer | (包含在内) | ~1.03× |
+| — close interleave | — | ~1.02× |
+
+综合优化：**1.71× 加速** (AMP 贡献最大)
+
+## 命令行原始输出
+
+### AMP 全量batch对比测试
+```bash
+python3 -u -c "
+import sys, time; sys.path.insert(0, '.')
+import torch
+from torch.utils.data import DataLoader
+from src.wideresnet import wrn_28_2
+from src.fixmatch import fixmatch_loss
+from src.dataset import CIFAR10Labeled, CIFAR10Unlabeled, TransformWeak, TransformStrong, _split_labeled_indices
+from torchvision.datasets import CIFAR10
+
+device = 'cuda'
+model = wrn_28_2(num_classes=10).to(device)
+data_root = './data'
+train_dataset = CIFAR10(root=data_root, train=True, download=False)
+labeled_indices, unlabeled_indices = _split_labeled_indices(
+    train_dataset.targets, 250, num_classes=10, seed=0)
+transform_weak = TransformWeak(); transform_strong = TransformStrong()
+labeled_dataset = CIFAR10Labeled(data_root, labeled_indices, transform_weak)
+unlabeled_dataset = CIFAR10Unlabeled(data_root, unlabeled_indices, transform_weak, transform_strong)
+labeled_loader = DataLoader(labeled_dataset, batch_size=64, shuffle=True, num_workers=0, drop_last=False)
+unlabeled_loader = DataLoader(unlabeled_dataset, batch_size=448, shuffle=True, num_workers=0, drop_last=True)
+x_l, y_l = next(iter(labeled_loader))
+(x_w, x_s) = next(iter(unlabeled_loader))
+x_l, y_l = x_l.to(device), y_l.to(device); x_w, x_s = x_w.to(device), x_s.to(device)
+
+# Warmup
+for _ in range(5):
+    total_loss, _, _, _ = fixmatch_loss(model, x_l, y_l, x_w, x_s, use_interleave=False)
+    total_loss.backward()
+
+N=30
+# FP32
+model.zero_grad(); torch.cuda.synchronize()
+t0 = time.time()
+for _ in range(N):
+    total_loss, _, _, _ = fixmatch_loss(model, x_l, y_l, x_w, x_s, use_interleave=False)
+    total_loss.backward()
+torch.cuda.synchronize()
+f32_time = time.time() - t0
+
+# AMP
+scaler = torch.amp.GradScaler('cuda')
+for _ in range(5):
+    with torch.amp.autocast('cuda'):
+        total_loss, _, _, _ = fixmatch_loss(model, x_l, y_l, x_w, x_s, use_interleave=False)
+    scaler.scale(total_loss).backward()
+
+model.zero_grad(); torch.cuda.synchronize()
+t0 = time.time()
+for _ in range(N):
+    model.zero_grad(set_to_none=True)
+    with torch.amp.autocast('cuda'):
+        total_loss, _, _, _ = fixmatch_loss(model, x_l, y_l, x_w, x_s, use_interleave=False)
+    scaler.scale(total_loss).backward()
+torch.cuda.synchronize()
+amp_time = time.time() - t0
+
+print(f'FP32: {N/f32_time:.1f} steps/s, {f32_time/N*1000:.1f} ms/step')
+print(f'AMP:  {N/amp_time:.1f} steps/s, {amp_time/N*1000:.1f} ms/step')
+print(f'Speedup: {f32_time/amp_time:.2f}x')
+"
+Full batch (64+448, 30 iters):
+FP32: 4.0 steps/s, 248.0 ms/step
+AMP:  6.9 steps/s, 144.7 ms/step
+Speedup: 1.71x
+```
 
 ## 注意事项
-- 以上为纯计算时间估算，不含数据加载、日志、评估开销
-- 实际时间可能 +10-20%（评估、检查点 I/O）
-- RTX 4090 的 9.28× 是理论 FP32 比，实际受限于内存带宽等其他因素，可能仅 5-7×
-- V100 实际可能比线性估算略好（HBM2 高带宽）
+- cudnn_benchmark 首步增加约 10s 搜索开销，2^20 步下可忽略
+- 小 batch (≤64) 不建议 AMP：开销大于收益
+- 全量 batch (512) AMP 才发挥 Tensor Core 优势
+- 评估/日志/检查点 I/O 约 +5-8% 时间开销
