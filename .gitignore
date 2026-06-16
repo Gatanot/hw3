@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+checkpoints/
+logs/
+data/
+
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+report/main.pdf
+
+# Wandb
+wandb/

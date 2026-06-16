@@ -1,0 +1,96 @@
+\documentclass[12pt,a4paper]{article}
+
+% === 中文支持 ===
+\usepackage[UTF8]{ctex}
+\usepackage[heading=true]{ctex}
+
+% === 基础包 ===
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\title{\textbf{半监督图像分类实验报告}}
+\author{学号: \qquad 姓名:}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本实验基于 PyTorch 从零实现了 FixMatch 半监督图像分类算法，
+在 CIFAR-10 数据集上分别使用 40、250、4000 张标注数据进行了实验，
+并与 USB 库中提供的 FixMatch 实现进行了对比。
+同时分析了 FixMatch 与其他半监督算法（如 MixMatch）的异同。
+\end{abstract}
+
+\section{引言}
+% 介绍半监督学习背景及 FixMatch 算法
+
+\section{算法原理}
+\subsection{FixMatch 算法概述}
+% 详细描述 FixMatch 的算法流程
+
+\subsection{伪标签生成}
+% argmax + 置信度阈值
+
+\subsection{一致性正则化}
+% 弱增强 → 伪标签 → 强增强
+
+\subsection{损失函数}
+% L = L_sup + lambda * L_unsup
+
+\section{实验设置}
+\subsection{数据集}
+% CIFAR-10, 标注量设置
+
+\subsection{网络结构}
+% WideResNet-28-2
+
+\subsection{训练超参数}
+% 表格: lr, batch_size, uratio, confidence threshold, ema, etc.
+
+\subsection{数据增强}
+% 弱增强 + 强增强 (RandAugment + Cutout)
+
+\section{实验结果}
+\subsection{自实现 FixMatch 结果}
+% 表格: 40/250/4000 标注量下的准确率
+
+\subsection{与 USB 库对比}
+% 对比表格
+
+\subsection{与论文结果对比}
+% 与任务文档中表格对比
+
+\section{分析与讨论}
+\subsection{FixMatch 与 MixMatch 对比分析}
+% 算法思想的异同
+
+\subsection{消融实验 (可选)}
+% 不同阈值、不同增强策略的影响
+
+\section{结论}
+% 总结
+
+\section*{参考文献}
+\begin{enumerate}[label={[\arabic*]}]
+    \item Sohn, K., et al. FixMatch: Simplifying Semi-Supervised Learning with Consistency and Confidence. NeurIPS 2020.
+    \item Berthelot, D., et al. MixMatch: A Holistic Approach to Semi-Supervised Learning. NeurIPS 2019.
+    \item Wang, Y., et al. USB: A Unified Semi-supervised Learning Benchmark. NeurIPS 2022.
+    \item \url{https://github.com/google-research/fixmatch}
+    \item \url{https://github.com/microsoft/Semi-supervised-learning}
+\end{enumerate}
+
+\end{document}

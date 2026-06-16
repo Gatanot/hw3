@@ -1,0 +1,70 @@
+# FixMatch CIFAR-10 半监督学习配置文件
+
+# === 数据集 ===
+dataset:
+  name: cifar10
+  data_dir: ./data
+  num_classes: 10
+  img_size: 32
+  num_labels: 40          # 标注数据量: 40, 250, 4000
+  num_labeled_per_class: 4  # 每类标注数 (自动计算)
+
+# === 数据增强 ===
+augmentation:
+  weak:
+    flip: true
+    crop_padding: 4
+    crop_size: 32
+    normalize: true
+  strong:
+    randaugment:
+      n: 2               # RandAugment 操作数
+      m: 10              # RandAugment 强度
+    cutout:
+      size: 16
+      use_prob: 1.0
+    normalize: true
+
+# === 模型 ===
+model:
+  name: wideresnet
+  depth: 28
+  widen_factor: 2
+  dropout_rate: 0.0
+
+# === 优化器 ===
+optimizer:
+  name: sgd
+  lr: 0.03
+  momentum: 0.9
+  nesterov: true
+  weight_decay: 0.0005
+
+# === 学习率调度 ===
+lr_scheduler:
+  name: cosine
+  total_steps: 1048576    # 2^20
+  warmup_steps: 0
+
+# === FixMatch 超参数 ===
+fixmatch:
+  confidence_threshold: 0.95
+  unlabeled_loss_weight: 1.0
+  uratio: 7               # 无标注/标注 batch 比例
+  ema_decay: 0.999
+
+# === 训练 ===
+training:
+  batch_size: 64
+  eval_batch_size: 256
+  total_steps: 1048576    # 2^20
+  eval_interval: 1024     # 评估间隔
+  log_interval: 128       # 日志间隔
+  save_interval: 65536    # 保存间隔
+
+# === 系统 ===
+system:
+  seed: 0
+  num_workers: 4
+  use_amp: false          # 混合精度
+  device: cuda
