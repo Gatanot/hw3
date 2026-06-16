@@ -105,12 +105,18 @@ def fixmatch_loss(model, x_labeled, y_labeled, x_unlabeled_w, x_unlabeled_s,
 
     if use_interleave:
         combined = torch.cat([x_labeled, x_unlabeled_w, x_unlabeled_s], dim=0)
-        combined = interleave(combined, 2 * (ulb_batch_size // batch_size) + 1)
-        logits = model(combined)
-        logits = de_interleave(logits, 2 * (ulb_batch_size // batch_size) + 1)
-        logits_x = logits[:batch_size]
-        logits_weak = logits[batch_size:batch_size + ulb_batch_size]
-        logits_strong = logits[batch_size + ulb_batch_size:]
+        n_groups = (ulb_batch_size // batch_size) * 2 + 1
+        if combined.size(0) % n_groups == 0:
+            combined = interleave(combined, n_groups)
+            logits = model(combined)
+            logits = de_interleave(logits, n_groups)
+            logits_x = logits[:batch_size]
+            logits_weak = logits[batch_size:batch_size + ulb_batch_size]
+            logits_strong = logits[batch_size + ulb_batch_size:]
+        else:
+            logits_x = model(x_labeled)
+            logits_weak = model(x_unlabeled_w)
+            logits_strong = model(x_unlabeled_s)
     else:
         logits_x = model(x_labeled)
         logits_weak = model(x_unlabeled_w)

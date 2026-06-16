@@ -106,7 +106,7 @@ def get_cifar10_loaders(data_root, num_labels, batch_size=64, uratio=7,
 
     labeled_loader = DataLoader(
         labeled_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True, drop_last=True
+        num_workers=num_workers, pin_memory=True, drop_last=False
     )
     unlabeled_loader = DataLoader(
         unlabeled_dataset, batch_size=batch_size * uratio, shuffle=True,
