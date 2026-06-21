@@ -16,6 +16,7 @@ import sys
 import argparse
 import yaml
 import time
+from itertools import cycle
 
 import math
 import numpy as np
@@ -103,26 +104,16 @@ def train(args):
     # 训练循环
     model.train()
     best_acc = 0.0
-    labeled_iter = iter(labeled_loader)
-    unlabeled_iter = iter(unlabeled_loader)
+    labeled_iter = cycle(labeled_loader)
+    unlabeled_iter = cycle(unlabeled_loader)
 
     print(f"[Train] Starting training: {args.total_steps} steps "
           f"(AMP={args.use_amp}, interleave={args.use_interleave})")
     start_time = time.time()
 
     for step in range(args.total_steps):
-        # 获取 batch
-        try:
-            x_l, y_l = next(labeled_iter)
-        except StopIteration:
-            labeled_iter = iter(labeled_loader)
-            x_l, y_l = next(labeled_iter)
-
-        try:
-            x_w, x_s = next(unlabeled_iter)
-        except StopIteration:
-            unlabeled_iter = iter(unlabeled_loader)
-            x_w, x_s = next(unlabeled_iter)
+        x_l, y_l = next(labeled_iter)
+        x_w, x_s = next(unlabeled_iter)
 
         x_l, y_l = x_l.to(device, non_blocking=True), y_l.to(device, non_blocking=True)
         x_w, x_s = x_w.to(device, non_blocking=True), x_s.to(device, non_blocking=True)
