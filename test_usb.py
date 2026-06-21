@@ -103,7 +103,7 @@ def run_usb_fixmatch(num_labels, total_steps, data_dir, seed=0):
             # Pseudo-labeling with confidence threshold
             probs_ulb_w = torch.softmax(logits_ulb_w.detach(), dim=-1)
             max_probs, pseudo_labels = probs_ulb_w.max(dim=-1)
-            mask = (max_probs >= 0.95).float()
+            mask = (max_probs > 0.95).float()
 
             # Unsupervised loss (cross-entropy with pseudo-labels, masked)
             unsup_loss = cons_loss(logits_ulb_s, pseudo_labels)
