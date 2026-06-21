@@ -10,18 +10,19 @@ def _split_labeled_indices(labels, num_labels_total, num_classes=10, seed=0):
     """
     从全部训练数据中均匀选取 num_labels_total 个标注样本。
     返回 labeled 和 unlabeled 的索引列表。
+    Paper: unlabeled includes all labeled data without labels.
     """
     labels = np.array(labels)
     num_per_class = num_labels_total // num_classes
     rng = np.random.RandomState(seed)
 
     labeled_indices = []
-    unlabeled_indices = []
     for c in range(num_classes):
         class_indices = np.where(labels == c)[0]
         rng.shuffle(class_indices)
         labeled_indices.extend(class_indices[:num_per_class].tolist())
-        unlabeled_indices.extend(class_indices[num_per_class:].tolist())
+
+    unlabeled_indices = list(range(len(labels)))
 
     rng.shuffle(labeled_indices)
     rng.shuffle(unlabeled_indices)
@@ -97,7 +98,7 @@ def get_cifar10_loaders(data_root, num_labels, batch_size=64, uratio=7,
     )
 
     transform_weak = TransformWeak()
-    transform_strong = TransformStrong(num_ops=2, magnitude=10, cutout_size=16)
+    transform_strong = TransformStrong(num_ops=2, max_magnitude=10, cutout_size=16)
 
     labeled_dataset = CIFAR10Labeled(data_root, labeled_indices, transform_weak)
     unlabeled_dataset = CIFAR10Unlabeled(data_root, unlabeled_indices,

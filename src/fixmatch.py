@@ -130,7 +130,7 @@ def fixmatch_loss(model, x_labeled, y_labeled, x_unlabeled_w, x_unlabeled_s,
         pseudo_probs = F.softmax(logits_weak, dim=1)
         pseudo_labels = pseudo_probs.argmax(dim=1)
         max_probs = pseudo_probs.max(dim=1).values
-        mask = (max_probs >= confidence_threshold).float()
+        mask = (max_probs > confidence_threshold).float()
 
     # 无监督损失：用伪标签监督强增强输出，仅保留高置信度样本
     unsup_loss = F.cross_entropy(logits_strong, pseudo_labels, reduction='none')

@@ -17,6 +17,7 @@ import argparse
 import yaml
 import time
 
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -86,9 +87,11 @@ def train(args):
         weight_decay=args.weight_decay,
     )
 
-    # 学习率调度: cosine decay to 0
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.total_steps, eta_min=0
+    # 学习率调度: η cos(7πk / 16K) as per FixMatch paper
+    total_steps = args.total_steps
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: math.cos(7 * math.pi * step / (16 * total_steps))
     )
 
     # AMP 混合精度
