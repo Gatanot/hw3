@@ -89,3 +89,17 @@
 1. **CPU 小规模**：每个模块先用 CPU + 小数据 (单 batch) 验证正确性
 2. **GPU 全量**：确认正确后扩展到完整训练
 3. **编码规则**：核心模块自行编写，参考开源代码思路但不直接复制
+
+## 论文对齐修复（见 experiments/08_implementation_notes.md）
+- LR 调度：CosineAnnealingLR → LambdaLR(cos(7πk/16K))
+- 置信度阈值：>= → >
+- 数据划分：labeled 纳入 unlabeled 池
+- 增强：RandAugment 随机幅度 + Cutout 均值填充
+
+## 训练计划修订
+- 40/250 labels 自定义全量 → 云端已完成
+- 4000 labels → 暂跳过（经费限制）
+- 自定义 16384 步小规模 ×3 → 待跑
+- USB 16384 步小规模 ×3 → 待跑（conda env: semilearn_test）
+- USB 40/250 全量 → 待跑
+- 若余额充足，用修复后代码重跑自定义 40/250
