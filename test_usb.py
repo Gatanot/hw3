@@ -4,6 +4,7 @@
 通过模拟 USB 训练循环，单独调用 train_step
 """
 import sys, os, math, argparse
+from itertools import cycle
 sys.path.insert(0, '.')
 import numpy as np
 import torch
@@ -37,6 +38,8 @@ def run_usb_fixmatch(num_labels, total_steps, data_dir, seed=0):
     print(f"{'='*60}\n")
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
     set_seed(seed)
 
     labeled_loader, unlabeled_loader, test_loader, _, _ = get_cifar10_loaders(
@@ -62,29 +65,20 @@ def run_usb_fixmatch(num_labels, total_steps, data_dir, seed=0):
 
     model.train()
     best_acc = 0.0
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler('cuda')
 
-    labeled_iter = iter(labeled_loader)
-    unlabeled_iter = iter(unlabeled_loader)
+    labeled_iter = cycle(labeled_loader)
+    unlabeled_iter = cycle(unlabeled_loader)
 
     for step in range(total_steps):
-        try:
-            x_l, y_l = next(labeled_iter)
-        except StopIteration:
-            labeled_iter = iter(labeled_loader)
-            x_l, y_l = next(labeled_iter)
-
-        try:
-            x_w, x_s = next(unlabeled_iter)
-        except StopIteration:
-            unlabeled_iter = iter(unlabeled_loader)
-            x_w, x_s = next(unlabeled_iter)
+        x_l, y_l = next(labeled_iter)
+        x_w, x_s = next(unlabeled_iter)
 
         x_l, y_l = x_l.to(device), y_l.to(device)
         x_w, x_s = x_w.to(device), x_s.to(device)
 
         # USB FixMatch train_step logic
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.amp.autocast('cuda', enabled=True):
             # Labeled forward
             outs_l = model(x_l)
             logits_l = outs_l['logits']
